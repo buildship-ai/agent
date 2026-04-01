@@ -1,0 +1,14 @@
+# Source
+src/
+tsconfig.json
+tsup.config.ts
+
+# Configs & Dev
+node_modules/
+*.log
+.DS_Store
+
+# Tests
+tests/
+*.test.ts
+*.spec.ts

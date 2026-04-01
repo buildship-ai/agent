@@ -1,0 +1,61 @@
+{
+  "name": "@buildship-ai/agent",
+  "description": "BuildShip Agent SDK — core + React bindings.",
+  "version": "0.0.5",
+  "author": "BuildShip",
+  "dependencies": {
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.14",
+    "tsup": "^8.5.1",
+    "typescript": "5.8.3",
+    "vitest": "^4.0.18"
+  },
+  "exports": {
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js",
+      "require": "./dist/core/index.cjs"
+    },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "import": "./dist/react/index.js",
+      "require": "./dist/react/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "agent",
+    "ai",
+    "buildship",
+    "react",
+    "streaming"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "react": "^18.2.0"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "prepublishOnly": "npm run build",
+    "test": "vitest run --exclude 'tests/e2e/**'",
+    "test:e2e": "vitest run tests/e2e"
+  },
+  "type": "module",
+  "typesVersions": {
+    "*": {
+      "core": [
+        "./dist/core/index.d.ts"
+      ],
+      "react": [
+        "./dist/react/index.d.ts"
+      ]
+    }
+  }
+}
