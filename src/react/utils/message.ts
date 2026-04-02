@@ -8,11 +8,12 @@ import type { MessagePart } from "../types";
 export function updateAgentMessageParts(parts: MessagePart[], newPart: MessagePart): MessagePart[] {
   const last = parts[parts.length - 1];
 
-  // Merge contiguous text deltas
+  // Merge contiguous text deltas from the same agent
   const canMerge =
     last?.type === "text" &&
     newPart.type === "text" &&
-    newPart.firstSequence === last.lastSequence + 1;
+    newPart.firstSequence === last.lastSequence + 1 &&
+    newPart.agentId === last.agentId;
 
   if (canMerge) {
     return [

@@ -293,7 +293,8 @@ interface StreamCallbacks {
 
 ### Stream Events
 
-All events share a `meta` object with `executionId` and `sequence`.
+All events share a `meta` object with `executionId`, `sequence`, and `agentId`
+(the ID of the agent that produced the event — changes after handoffs).
 
 | Event Type        | Description                        | Data                                                              |
 | ----------------- | ---------------------------------- | ----------------------------------------------------------------- |
@@ -432,9 +433,13 @@ raw delta → textDeltaModifier(delta) → accumulated text → fullTextModifier
 `textDeltaModifier` acts as a per-chunk preprocessor; `fullTextModifier` acts as
 a post-accumulation formatter on top of the already-modified text.
 
-> **Note:** If `textDeltaModifier` strips or transforms content,
-> `fullTextModifier` will only see the already-modified accumulation — the
-> original unmodified stream text is not preserved.
+> **Note:** Both modifiers receive `meta.agentId`, which identifies the agent
+> that produced the current event. In multi-agent setups, `fullTextModifier`
+> only accumulates text from the **same agent's** trailing text group — text
+> from earlier agents (before a handoff) is not included. If
+> `textDeltaModifier` strips or transforms content, `fullTextModifier` will
+> only see the already-modified accumulation — the original unmodified stream
+> text is not preserved.
 
 ## `useAgentContext` Hook
 
@@ -657,7 +662,9 @@ type Message = {
   attachments?: Array<ImagePart | FilePart>; // Multimodal user message attachments
 };
 
-type MessagePart =
+type MessagePart = {
+  agentId?: string; // The agent that produced this part (changes after handoffs)
+} & (
   | { type: "text"; text: string; firstSequence: number; lastSequence: number }
   | {
       type: "widget";
@@ -682,8 +689,13 @@ type MessagePart =
     }
   | { type: "reasoning"; reasoning: string; index?: number }
   | { type: "handoff"; agentName: string }
-  | { type: "run_error"; message: string; code?: string };
+  | { type: "run_error"; message: string; code?: string }
+);
 ```
+
+Every part carries an optional `agentId` identifying which agent produced it.
+In multi-agent (handoff) scenarios, parts within the same message may have
+different `agentId` values — use this to group or label content by agent.
 
 > **Tip:** When rendering messages, iterate over `msg.parts` instead of
 > `msg.content` to get text, widgets, tool calls, reasoning, handoffs, and

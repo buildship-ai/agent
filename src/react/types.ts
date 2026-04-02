@@ -16,7 +16,10 @@ export type ClientToolDefinition = {
   await?: boolean;
 };
 
-export type MessagePart =
+export type MessagePart = {
+  /** The agent that produced this part. */
+  agentId?: string;
+} & (
   | {
       type: "text";
       text: string;
@@ -65,7 +68,8 @@ export type MessagePart =
       message: string;
       code?: string;
       sequence: number;
-    };
+    }
+);
 
 export type Message = {
   role: "user" | "agent";

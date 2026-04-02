@@ -163,20 +163,22 @@ function handleTextDelta(
 
   setMessages((prev) => {
     const lastMessage = prev[prev.length - 1];
+    const resolvedAgentId = event.meta.agentId || agentId;
     const meta = {
       executionId: eventExecutionId,
       sequence,
-      agentId: event.meta.agentId || agentId,
+      agentId: resolvedAgentId,
     };
 
     // Calculate the modified text delta using the full text accumulation so far
     let text = originalText;
     if (modifier) {
-      // Get raw full text from the last text part's _rawContent, or fall back to content
+      // Get raw full text from the last text part from the same agent
       const lastTextPart =
         lastMessage?.role === "agent"
           ? lastMessage.parts?.findLast(
-              (p): p is Extract<MessagePart, { type: "text" }> => p.type === "text",
+              (p): p is Extract<MessagePart, { type: "text" }> =>
+                p.type === "text" && p.agentId === resolvedAgentId,
             )
           : undefined;
       const currentFullText = lastTextPart?._rawText ?? lastTextPart?.text ?? "";
@@ -188,36 +190,51 @@ function handleTextDelta(
       text,
       firstSequence: sequence,
       lastSequence: sequence,
+      agentId: resolvedAgentId,
     };
 
     let updatedMessages: Message[];
 
     if (lastMessage?.role === "agent") {
-      // Get raw accumulated text from the last text part
-      const lastTextPart = lastMessage.parts?.findLast(
-        (p): p is Extract<MessagePart, { type: "text" }> => p.type === "text",
-      );
-      const prevRaw = lastTextPart?._rawText ?? lastTextPart?.text ?? "";
-      const rawText = prevRaw + text;
-      let updatedParts = updateAgentMessageParts(lastMessage.parts || [], newPart);
+      // When fullTextModifier is active, skip merge — the existing part's `text`
+      // is already modified, so concatenating it with a raw delta would produce
+      // garbage. The collapsing logic below handles combining via `_rawText`.
+      let updatedParts = fullTextModifier
+        ? [...(lastMessage.parts || []), newPart]
+        : updateAgentMessageParts(lastMessage.parts || [], newPart);
 
-      // If fullTextModifier is set, replace content AND collapse text parts
+      // Find the trailing contiguous text parts from the same agent
+      let trailingStart = updatedParts.length;
+      for (let i = updatedParts.length - 1; i >= 0; i--) {
+        const p = updatedParts[i];
+        if (p.type === "text" && p.agentId === resolvedAgentId) {
+          trailingStart = i;
+        } else {
+          break;
+        }
+      }
+      const trailingTextParts = updatedParts.slice(trailingStart) as Extract<
+        MessagePart,
+        { type: "text" }
+      >[];
+
+      // Accumulate raw text only from this agent's trailing text group
+      const rawText = trailingTextParts.map((p) => p._rawText ?? p.text).join("");
+
+      // If fullTextModifier is set, collapse only the trailing group in place
       let displayContent = rawText;
       if (fullTextModifier) {
         displayContent = fullTextModifier(rawText, meta);
-        // Collapse all text parts into a single part with the modified full text
-        const textParts = updatedParts.filter(
-          (p): p is Extract<MessagePart, { type: "text" }> => p.type === "text",
-        );
-        const nonTextParts = updatedParts.filter((p) => p.type !== "text");
         const modifiedTextPart: MessagePart = {
           type: "text",
           text: displayContent,
           _rawText: rawText,
-          firstSequence: textParts[0]?.firstSequence ?? sequence,
-          lastSequence: textParts[textParts.length - 1]?.lastSequence ?? sequence,
+          firstSequence: trailingTextParts[0]?.firstSequence ?? sequence,
+          lastSequence: trailingTextParts[trailingTextParts.length - 1]?.lastSequence ?? sequence,
+          agentId: resolvedAgentId,
         };
-        updatedParts = [...nonTextParts, modifiedTextPart];
+        // Replace only the trailing group, keep everything before it intact
+        updatedParts = [...updatedParts.slice(0, trailingStart), modifiedTextPart];
       }
 
       const updatedMessage: Message = {
@@ -239,6 +256,7 @@ function handleTextDelta(
             _rawText: text,
             firstSequence: sequence,
             lastSequence: sequence,
+            agentId: resolvedAgentId,
           },
         ];
       }
@@ -281,6 +299,7 @@ function handleClientToolCall(
       sequence: event.meta.sequence,
       paused: event.data.paused,
       status: "pending",
+      agentId: event.meta.agentId,
     };
 
     let updatedMessages: Message[];
@@ -328,6 +347,7 @@ function handleToolCallStart(
       inputs,
       serverName,
       sequence: event.meta.sequence,
+      agentId: event.meta.agentId,
     };
 
     const updated: Message = {
@@ -410,17 +430,23 @@ function handleReasoningDelta(
       }
     }
 
+    const newReasoningPart: MessagePart = {
+      type: "reasoning",
+      reasoning: delta,
+      index,
+      sequence: event.meta.sequence,
+      agentId: event.meta.agentId,
+    };
+
     if (existingIdx === -1) {
-      // No existing reasoning part — append a new one
-      parts.push({ type: "reasoning", reasoning: delta, index, sequence: event.meta.sequence });
+      parts.push(newReasoningPart);
     } else {
-      // Check if there are any non-reasoning parts after the existing one.
-      // If so, the model produced new reasoning AFTER tool calls, so we
-      // should append a new entry to preserve chronological order.
+      // If non-reasoning parts exist after the current one, the model produced
+      // new reasoning AFTER tool calls — append to preserve chronological order.
       const hasInterleavedItems = parts.slice(existingIdx + 1).some((p) => p.type !== "reasoning");
 
       if (hasInterleavedItems) {
-        parts.push({ type: "reasoning", reasoning: delta, index, sequence: event.meta.sequence });
+        parts.push(newReasoningPart);
       } else {
         const existing = parts[existingIdx] as Extract<MessagePart, { type: "reasoning" }>;
         parts[existingIdx] = {
@@ -449,6 +475,7 @@ function handleAgentHandoff(
       type: "handoff",
       agentName: event.data.agentName,
       sequence: event.meta.sequence,
+      agentId: event.meta.agentId,
     };
 
     const updated: Message = {
@@ -475,6 +502,7 @@ function handleRunError(
       message: event.data.message,
       code: event.data.code,
       sequence: event.meta.sequence,
+      agentId: event.meta.agentId,
     };
 
     const updated: Message = {
