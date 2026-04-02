@@ -1,7 +1,7 @@
 {
   "name": "@buildship-ai/agent",
   "description": "BuildShip Agent SDK — core + React bindings.",
-  "version": "0.0.5",
+  "version": "0.0.7",
   "author": "BuildShip",
   "dependencies": {
     "zod": "^4.3.6"
@@ -14,11 +14,13 @@
   },
   "exports": {
     "./core": {
+      "development": "./src/core/index.ts",
       "types": "./dist/core/index.d.ts",
       "import": "./dist/core/index.js",
       "require": "./dist/core/index.cjs"
     },
     "./react": {
+      "development": "./src/react/index.ts",
       "types": "./dist/react/index.d.ts",
       "import": "./dist/react/index.js",
       "require": "./dist/react/index.cjs"
