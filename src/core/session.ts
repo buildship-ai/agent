@@ -200,9 +200,13 @@ export class AgentSession {
     body: ExecuteRequestBody,
     callbacks: StreamCallbacks,
     options?: ExecuteOptions,
+    processedCallIds?: Set<string>,
   ): Promise<void> {
     // Create a fresh abort controller for this run
     this._abortController = new AbortController();
+
+    // Shared across the entire auto-resume chain to skip duplicate tool_call_start events
+    const callIds = processedCallIds ?? new Set<string>();
 
     const baseHeaders = this._agent._buildHeaders(this._sessionId);
     const mergedHeaders = { ...baseHeaders, ...(options?.headers || {}) };
@@ -214,6 +218,7 @@ export class AgentSession {
       callbacks,
       clientTools: this._agent._clientTools,
       signal: this._abortController.signal,
+      processedCallIds: callIds,
 
       onSessionId: (id, name) => {
         this._sessionId = id;
@@ -243,7 +248,7 @@ export class AgentSession {
           resumeBody.clientTools = clientToolDefs;
         }
 
-        await this._run(resumeBody, callbacks, options);
+        await this._run(resumeBody, callbacks, options, callIds);
       },
     });
   }

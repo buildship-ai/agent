@@ -46,7 +46,11 @@ export async function executeStream(options: StreamOptions): Promise<void> {
     onPaused,
     onAutoResume,
     onResponse,
+    processedCallIds: _processedCallIds,
   } = options;
+
+  // Shared across resume cycles to skip duplicate tool_call_start events
+  const processedCallIds = _processedCallIds ?? new Set<string>();
 
   let fullText = "";
 
@@ -148,6 +152,7 @@ export async function executeStream(options: StreamOptions): Promise<void> {
           onPaused,
           onAutoResume,
           pendingAutoResumes,
+          processedCallIds,
         );
 
         // Accumulate text
@@ -181,6 +186,7 @@ export async function executeStream(options: StreamOptions): Promise<void> {
             onPaused,
             onAutoResume,
             pendingAutoResumes,
+            processedCallIds,
           );
           if (streamEvent.type === "text_delta") {
             fullText += streamEvent.data;
@@ -244,6 +250,7 @@ function handleEvent(
   onPaused: StreamOptions["onPaused"],
   onAutoResume: StreamOptions["onAutoResume"],
   pendingAutoResumes: Promise<{ callId: string; result: unknown } | null>[],
+  processedCallIds: Set<string>,
 ): void {
   // Notify raw event consumers
   callbacks.onEvent?.(event);
@@ -271,6 +278,14 @@ function handleEvent(
 
       // Notify callback
       callbacks.onToolStart?.(toolName, toolType);
+
+      // Skip duplicate tool_call_start events (same callId already processed in a prior resume cycle)
+      if (callId && processedCallIds.has(callId)) {
+        break;
+      }
+      if (callId) {
+        processedCallIds.add(callId);
+      }
 
       // Handle client tools
       if (toolType === "client") {

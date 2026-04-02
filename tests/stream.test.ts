@@ -415,6 +415,103 @@ describe("executeStream", () => {
     });
   });
 
+  // ── Deduplication of tool_call_start events ───────────────────────
+
+  it("skips duplicate tool_call_start events with the same callId", async () => {
+    let handlerCallCount = 0;
+
+    const clientTools = new Map<string, ClientTool>();
+    clientTools.set("add_color", {
+      name: "add_color",
+      description: "Add color",
+      parameters: {},
+      await: true,
+      handler: async () => {
+        handlerCallCount++;
+        return "done";
+      },
+    });
+
+    // Simulate server replaying the same tool_call_start event twice (same callId)
+    mockFetch([
+      {
+        type: "tool_call_start",
+        data: {
+          callId: "dup-1",
+          toolName: "add_color",
+          toolType: "client",
+          inputs: '{"hex":"#FF0000"}',
+          paused: true,
+        },
+      },
+      {
+        type: "tool_call_start",
+        data: {
+          callId: "dup-1",
+          toolName: "add_color",
+          toolType: "client",
+          inputs: '{"hex":"#FF0000"}',
+          paused: true,
+        },
+      },
+    ]);
+
+    const executeStream = await getExecuteStream();
+    await executeStream(
+      buildOptions({
+        clientTools,
+        onAutoResume: async () => {},
+      }),
+    );
+
+    // Handler should only be called once — the duplicate is skipped
+    expect(handlerCallCount).toBe(1);
+  });
+
+  it("skips tool_call_start for callIds already in processedCallIds", async () => {
+    let handlerCallCount = 0;
+
+    const clientTools = new Map<string, ClientTool>();
+    clientTools.set("add_color", {
+      name: "add_color",
+      description: "Add color",
+      parameters: {},
+      await: true,
+      handler: async () => {
+        handlerCallCount++;
+        return "done";
+      },
+    });
+
+    // Pre-populate processedCallIds as if from a prior resume cycle
+    const processedCallIds = new Set(["already-processed"]);
+
+    mockFetch([
+      {
+        type: "tool_call_start",
+        data: {
+          callId: "already-processed",
+          toolName: "add_color",
+          toolType: "client",
+          inputs: '{"hex":"#00FF00"}',
+          paused: true,
+        },
+      },
+    ]);
+
+    const executeStream = await getExecuteStream();
+    await executeStream(
+      buildOptions({
+        clientTools,
+        processedCallIds,
+        onAutoResume: async () => {},
+      }),
+    );
+
+    // Handler should NOT be called — callId was already processed in prior cycle
+    expect(handlerCallCount).toBe(0);
+  });
+
   // ── Client tool: paused with handler that throws → error event ─────
 
   it("synthesizes tool_call_end with error when handler throws", async () => {

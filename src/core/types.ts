@@ -216,4 +216,6 @@ export interface StreamOptions {
   onAutoResume?: (callId: string, result: any) => void;
   /** Called with the raw Response object after the HTTP request completes. */
   onResponse?: (response: Response) => void;
+  /** @internal Set of callIds already processed — shared across resume cycles to dedup tool_call_start. */
+  processedCallIds?: Set<string>;
 }
