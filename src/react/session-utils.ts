@@ -1,4 +1,6 @@
 import { useCallback, useMemo, useRef } from "react";
+import { useThrottledCallback } from "use-debounce";
+
 import type { Message, Session } from "./types";
 import { TEMPORARY_SESSION_ID } from "./constants";
 
@@ -38,27 +40,31 @@ export const useSessionUtils = (
 
   const syncSessionRef = useRef<(messages?: Array<Message>) => void>();
 
-  syncSessionRef.current = (updatedMessages?: Array<Message>) => {
-    if (!currentSessionId || currentSessionId === TEMPORARY_SESSION_ID) {
-      return;
-    }
+  syncSessionRef.current = useThrottledCallback(
+    (updatedMessages?: Array<Message>) => {
+      if (!currentSessionId || currentSessionId === TEMPORARY_SESSION_ID) {
+        return;
+      }
 
-    const messagesToPersist = sanitizeMessagesForStorage(updatedMessages ?? messagesRef.current);
+      const messagesToPersist = sanitizeMessagesForStorage(updatedMessages ?? messagesRef.current);
 
-    setAllSessions((prev) => ({
-      ...prev,
-      [agentId]: {
-        ...prev[agentId],
-        [currentSessionId]: {
-          ...prev[agentId]?.[currentSessionId],
-          id: prev[agentId]?.[currentSessionId]?.id ?? currentSessionId,
-          createdAt: prev[agentId]?.[currentSessionId]?.createdAt ?? Date.now(),
-          messages: messagesToPersist,
-          updatedAt: Date.now(),
+      setAllSessions((prev) => ({
+        ...prev,
+        [agentId]: {
+          ...prev[agentId],
+          [currentSessionId]: {
+            ...prev[agentId]?.[currentSessionId],
+            id: prev[agentId]?.[currentSessionId]?.id ?? currentSessionId,
+            createdAt: prev[agentId]?.[currentSessionId]?.createdAt ?? Date.now(),
+            messages: messagesToPersist,
+            updatedAt: Date.now(),
+          },
         },
-      },
-    }));
-  };
+      }));
+    },
+    1500,
+    { leading: true },
+  );
 
   const getInitialSessionId = () => {
     const sessions = Object.values(agentSessions);
@@ -132,6 +138,13 @@ export const useSessionUtils = (
 
   return {
     agentSessions,
+    /**
+     * `syncSessionRef` is a throttled function. Calls made in between the 1000ms throttling period will be ignored.
+     * The easiest way to make sure the function isn't ever called "out-of-order" is to ensure the messages list passed in as
+     * argument is maintained synchronously (which is the case with the `messages` state in `useAgent`, and the `messagesRef` which
+     * always stores an up-to-date `messages` value), so even if a call is skipped due to throttling, the next call will still contain
+     * that missed change because the argument messages list will always be up-to-date.
+     * */
     syncSessionRef,
     getInitialSessionId,
     switchSession,
