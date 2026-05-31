@@ -36,28 +36,53 @@ export const useSessionUtils = (
 ) => {
   const agentSessions = useMemo(() => allSessions[agentId] || {}, [agentId, allSessions]);
 
+  // Ref that tracks currentSessionId immediately (not waiting for re-render).
+  // Updated eagerly in onSessionId so syncSessionRef reads the right value
+  // even between setCurrentSessionId() and the next render.
+  const currentSessionIdRef = useRef(currentSessionId);
+  currentSessionIdRef.current = currentSessionId;
+
   const syncSessionRef = useRef<(messages?: Array<Message>) => void>();
+  const pendingSyncRef = useRef<Array<Message> | null>(null);
+  const syncScheduledRef = useRef(false);
 
   syncSessionRef.current = (updatedMessages?: Array<Message>) => {
-    if (!currentSessionId || currentSessionId === TEMPORARY_SESSION_ID) {
+    const sid = currentSessionIdRef.current;
+    if (!sid || sid === TEMPORARY_SESSION_ID) {
       return;
     }
 
-    const messagesToPersist = sanitizeMessagesForStorage(updatedMessages ?? messagesRef.current);
+    // Capture the latest messages to persist. Multiple calls within the same
+    // render cycle will overwrite — only the last value matters.
+    pendingSyncRef.current = sanitizeMessagesForStorage(updatedMessages ?? messagesRef.current);
 
-    setAllSessions((prev) => ({
-      ...prev,
-      [agentId]: {
-        ...prev[agentId],
-        [currentSessionId]: {
-          ...prev[agentId]?.[currentSessionId],
-          id: prev[agentId]?.[currentSessionId]?.id ?? currentSessionId,
-          createdAt: prev[agentId]?.[currentSessionId]?.createdAt ?? Date.now(),
-          messages: messagesToPersist,
-          updatedAt: Date.now(),
-        },
-      },
-    }));
+    // Schedule a single microtask to flush. This moves setAllSessions out of
+    // the React render phase, avoiding the "setState during render" warning.
+    if (!syncScheduledRef.current) {
+      syncScheduledRef.current = true;
+      queueMicrotask(() => {
+        syncScheduledRef.current = false;
+        const msgs = pendingSyncRef.current;
+        if (!msgs) return;
+        pendingSyncRef.current = null;
+        const flushSid = currentSessionIdRef.current;
+        if (!flushSid || flushSid === TEMPORARY_SESSION_ID) return;
+
+        setAllSessions((prev) => ({
+          ...prev,
+          [agentId]: {
+            ...prev[agentId],
+            [flushSid]: {
+              ...prev[agentId]?.[flushSid],
+              id: prev[agentId]?.[flushSid]?.id ?? flushSid,
+              createdAt: prev[agentId]?.[flushSid]?.createdAt ?? Date.now(),
+              messages: msgs,
+              updatedAt: Date.now(),
+            },
+          },
+        }));
+      });
+    }
   };
 
   const getInitialSessionId = () => {
@@ -81,28 +106,32 @@ export const useSessionUtils = (
         return;
       }
 
+      // Compute the next session ID before mutating state
+      let nextSessionId: string | null = null;
+      if (sessionId === currentSessionId) {
+        const remaining = Object.values(agentSessions).filter((s) => s.id !== sessionId);
+        if (remaining.length > 0) {
+          nextSessionId = remaining.sort((a, b) => b.updatedAt - a.updatedAt)[0].id;
+        } else {
+          nextSessionId = TEMPORARY_SESSION_ID;
+        }
+      }
+
       setAllSessions((prev) => {
         const updatedAgentSessions = { ...prev[agentId] };
         delete updatedAgentSessions[sessionId];
-
-        // If we're deleting the current session, switch to the most recent remaining one
-        if (sessionId === currentSessionId) {
-          const remainingSessions = Object.values(updatedAgentSessions);
-          if (remainingSessions.length > 0) {
-            const mostRecent = remainingSessions.sort((a, b) => b.updatedAt - a.updatedAt)[0];
-            setCurrentSessionId(mostRecent.id);
-          } else {
-            setCurrentSessionId(TEMPORARY_SESSION_ID);
-          }
-        }
-
         return {
           ...prev,
           [agentId]: updatedAgentSessions,
         };
       });
+
+      // Switch session outside the updater to avoid cross-component setState
+      if (nextSessionId !== null) {
+        setCurrentSessionId(nextSessionId);
+      }
     },
-    [agentId, currentSessionId, setAllSessions, setCurrentSessionId],
+    [agentId, agentSessions, currentSessionId, setAllSessions, setCurrentSessionId],
   );
 
   const sessionsList = useMemo(
@@ -133,6 +162,7 @@ export const useSessionUtils = (
   return {
     agentSessions,
     syncSessionRef,
+    currentSessionIdRef,
     getInitialSessionId,
     switchSession,
     deleteSession,
