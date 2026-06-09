@@ -1,4 +1,6 @@
 import { useCallback, useMemo, useRef } from "react";
+import { useThrottledCallback } from "use-debounce";
+
 import type { Message, Session } from "./types";
 import { TEMPORARY_SESSION_ID } from "./constants";
 
@@ -46,6 +48,27 @@ export const useSessionUtils = (
   const pendingSyncRef = useRef<Array<Message> | null>(null);
   const syncScheduledRef = useRef(false);
 
+  // Throttle the actual setAllSessions write to avoid excessive localStorage updates.
+  const throttledPersist = useThrottledCallback(
+    (msgs: Array<Message>, sid: string) => {
+      setAllSessions((prev) => ({
+        ...prev,
+        [agentId]: {
+          ...prev[agentId],
+          [sid]: {
+            ...prev[agentId]?.[sid],
+            id: prev[agentId]?.[sid]?.id ?? sid,
+            createdAt: prev[agentId]?.[sid]?.createdAt ?? Date.now(),
+            messages: msgs,
+            updatedAt: Date.now(),
+          },
+        },
+      }));
+    },
+    1500,
+    { leading: true },
+  );
+
   syncSessionRef.current = (updatedMessages?: Array<Message>) => {
     const sid = currentSessionIdRef.current;
     if (!sid || sid === TEMPORARY_SESSION_ID) {
@@ -68,19 +91,7 @@ export const useSessionUtils = (
         const flushSid = currentSessionIdRef.current;
         if (!flushSid || flushSid === TEMPORARY_SESSION_ID) return;
 
-        setAllSessions((prev) => ({
-          ...prev,
-          [agentId]: {
-            ...prev[agentId],
-            [flushSid]: {
-              ...prev[agentId]?.[flushSid],
-              id: prev[agentId]?.[flushSid]?.id ?? flushSid,
-              createdAt: prev[agentId]?.[flushSid]?.createdAt ?? Date.now(),
-              messages: msgs,
-              updatedAt: Date.now(),
-            },
-          },
-        }));
+        throttledPersist(msgs, flushSid);
       });
     }
   };
@@ -161,6 +172,13 @@ export const useSessionUtils = (
 
   return {
     agentSessions,
+    /**
+     * `syncSessionRef` is a throttled function. Calls made in between the 1000ms throttling period will be ignored.
+     * The easiest way to make sure the function isn't ever called "out-of-order" is to ensure the messages list passed in as
+     * argument is maintained synchronously (which is the case with the `messages` state in `useAgent`, and the `messagesRef` which
+     * always stores an up-to-date `messages` value), so even if a call is skipped due to throttling, the next call will still contain
+     * that missed change because the argument messages list will always be up-to-date.
+     * */
     syncSessionRef,
     currentSessionIdRef,
     getInitialSessionId,

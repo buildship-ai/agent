@@ -4,6 +4,7 @@
   "version": "0.0.9",
   "author": "BuildShip",
   "dependencies": {
+    "use-debounce": "^9.0.4",
     "zod": "^4.3.6"
   },
   "devDependencies": {
