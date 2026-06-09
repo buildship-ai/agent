@@ -155,6 +155,9 @@ export default function useAgent(agent: BuildShipAgent, options?: UseAgentOption
                   sessionName || DEFAULT_SESSION_NAME,
                   messagesRef.current,
                 );
+                // Update ref eagerly so syncSessionRef reads the real session ID
+                // for stream deltas arriving before the next React render.
+                sessionUtils.currentSessionIdRef.current = newSessionId;
                 setCurrentSessionId(newSessionId);
               },
             };
